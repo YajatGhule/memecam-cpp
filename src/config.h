@@ -29,18 +29,25 @@ struct Config {
     bool meme_on_face = false;
     // [thresholds]: free-form numbers/bools (bools stored as 0/1), read via thr(key, default)
     std::map<std::string, double> thresholds;
-    // [memes.*] in file order
+    // [memes.*] in file order (base file first, then memes new in the overlay)
     std::vector<MemeSpec> memes;
 
     double thr(const std::string& key, double def) const {
         auto it = thresholds.find(key);
         return it == thresholds.end() ? def : it->second;
     }
+    const MemeSpec* meme(const std::string& name) const {
+        for (const auto& m : memes)
+            if (m.name == name) return &m;
+        return nullptr;
+    }
 };
 
 // Load `base` and, if given, merge `overlay` on top (tables merged key by key, like Python merge()).
+// Relative paths that don't exist from the working directory are resolved against MEMECAM_ROOT.
+// Throws std::runtime_error on a missing file or a TOML syntax error.
 Config load_config(const std::string& base, const std::string& overlay = "");
 
-std::string project_path(const std::string& rel);   // MEMECAM_ROOT / rel
+std::string project_path(const std::string& rel);   // MEMECAM_ROOT / rel (absolute paths unchanged)
 
 }  // namespace memecam
