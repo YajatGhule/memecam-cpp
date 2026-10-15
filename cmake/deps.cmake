@@ -1,0 +1,8 @@
+include(FetchContent)
+set(FETCHCONTENT_QUIET ON)
+FetchContent_Declare(tomlplusplus GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git GIT_TAG v3.4.0 GIT_SHALLOW ON)
+FetchContent_Declare(cli11 GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git GIT_TAG v2.5.0 GIT_SHALLOW ON)
+FetchContent_Declare(Catch2 GIT_REPOSITORY https://github.com/catchorg/Catch2.git GIT_TAG v3.8.1 GIT_SHALLOW ON)
+FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz)
+FetchContent_MakeAvailable(tomlplusplus cli11 Catch2 json)
+list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)

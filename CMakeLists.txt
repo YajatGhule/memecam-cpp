@@ -1,0 +1,53 @@
+cmake_minimum_required(VERSION 3.28)
+project(memecam_cpp LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui)
+find_package(Threads REQUIRED)
+include(cmake/deps.cmake)
+
+# Core: tracking logic, gestures, crowd, config, rendering — everything except model inference.
+file(GLOB CORE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
+list(FILTER CORE_SOURCES EXCLUDE REGEX ".*/src/(app|main)[^/]*\\.cpp$")
+add_library(memecam_core STATIC ${CORE_SOURCES})
+target_include_directories(memecam_core PUBLIC src)
+target_link_libraries(memecam_core PUBLIC ${OpenCV_LIBS} Threads::Threads tomlplusplus::tomlplusplus)
+target_compile_definitions(memecam_core PUBLIC MEMECAM_ROOT="${CMAKE_SOURCE_DIR}")
+
+# Vision: MediaPipe-equivalent pipelines on LiteRT (TensorFlow Lite C++).
+option(MEMECAM_WITH_VISION "Build the LiteRT vision pipelines and the app" ON)
+set(TF_SRC ${CMAKE_SOURCE_DIR}/third_party/tensorflow)
+if(MEMECAM_WITH_VISION)
+  if(NOT EXISTS ${TF_SRC}/tensorflow/lite/CMakeLists.txt)
+    message(FATAL_ERROR "LiteRT source missing: run tools/build_litert.sh (or -DMEMECAM_WITH_VISION=OFF)")
+  endif()
+  set(TFLITE_ENABLE_XNNPACK ON CACHE BOOL "" FORCE)
+  set(TFLITE_ENABLE_GPU OFF CACHE BOOL "" FORCE)
+  add_subdirectory(${TF_SRC}/tensorflow/lite ${CMAKE_BINARY_DIR}/litert EXCLUDE_FROM_ALL SYSTEM)
+  file(GLOB VISION_SOURCES CONFIGURE_DEPENDS src/vision/*.cpp)
+  add_library(memecam_vision STATIC ${VISION_SOURCES})
+  target_include_directories(memecam_vision PUBLIC src ${TF_SRC})
+  target_link_libraries(memecam_vision PUBLIC memecam_core tensorflow-lite)
+
+  foreach(exe memecam memecamv2)
+    add_executable(${exe} src/app.cpp)
+    target_link_libraries(${exe} PRIVATE memecam_vision CLI11::CLI11)
+  endforeach()
+  target_compile_definitions(memecamv2 PRIVATE MEMECAM_V2=1)
+endif()
+
+# Tests (no LiteRT needed for the logic tests).
+enable_testing()
+file(GLOB TEST_SOURCES CONFIGURE_DEPENDS tests/*.cpp)
+if(TEST_SOURCES)
+  add_executable(memecam_tests ${TEST_SOURCES})
+  target_link_libraries(memecam_tests PRIVATE memecam_core Catch2::Catch2WithMain nlohmann_json::nlohmann_json)
+  include(Catch)
+  catch_discover_tests(memecam_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
