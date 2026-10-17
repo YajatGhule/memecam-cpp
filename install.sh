@@ -31,7 +31,7 @@ install_deps() {
     [ "$(id -u)" -eq 0 ] || sudo="sudo"
     if command -v pacman >/dev/null; then
         say "installing build tools + OpenCV (pacman)"
-        $sudo pacman -S --needed --noconfirm base-devel cmake ninja git curl unzip opencv qt6-base hdf5 \
+        $sudo pacman -S --needed --noconfirm base-devel cmake ninja git curl unzip opencv qt6-base hdf5 ffmpeg yt-dlp \
             ttf-dejavu
     elif command -v apt-get >/dev/null; then
         say "installing build tools + OpenCV (apt)"
@@ -40,9 +40,11 @@ install_deps() {
             fonts-dejavu-core
         # freetype module for the bold meme captions (optional; plain font otherwise)
         $sudo apt-get install -y libopencv-contrib-dev 2>/dev/null || true
+        $sudo apt-get install -y ffmpeg yt-dlp 2>/dev/null || true   # meme sounds (optional)
     elif command -v dnf >/dev/null; then
         say "installing build tools + OpenCV (dnf)"
         $sudo dnf install -y gcc-c++ make cmake ninja-build git curl unzip opencv-devel dejavu-sans-fonts
+        $sudo dnf install -y ffmpeg-free yt-dlp 2>/dev/null || true   # meme sounds (optional)
     else
         warn "unknown package manager: install a C++20 compiler, CMake >= 3.28, Ninja, git, curl, unzip and"
         warn "OpenCV (with highgui + videoio) yourself, then re-run with MEMECAM_SKIP_DEPS=1"
@@ -77,6 +79,16 @@ say "fetching LiteRT sources (first time only: a few hundred MB)"
 tools/build_litert.sh
 say "fetching MediaPipe models"
 [ -f models/hand_landmarks_detector.tflite ] || tools/extract_models.sh --download
+
+# ---- meme sounds (copyrighted clips, so not in the repo: downloaded with yt-dlp + ffmpeg) ----
+if [ -z "$(ls "$DIR/assets/sounds/"*.wav 2>/dev/null)" ]; then
+    if command -v yt-dlp >/dev/null && command -v ffmpeg >/dev/null; then
+        say "downloading the meme sounds"
+        "$DIR/tools/fetch_sounds.sh" >/dev/null || warn "some meme sounds failed to download (re-run tools/fetch_sounds.sh)"
+    else
+        warn "no yt-dlp / ffmpeg: memes stay silent. Install both, then run $DIR/tools/fetch_sounds.sh"
+    fi
+fi
 
 # ---- 3. build ----------------------------------------------------------------------------------------
 say "building with $JOBS jobs (the first build compiles LiteRT: grab a coffee)"

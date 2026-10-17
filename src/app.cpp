@@ -1,7 +1,7 @@
 // Meme Cam: webcam + mocap markers + gesture-triggered memes (port of memecam/main.py main()).
 // Built twice: `memecam` and `memecamv2` (MEMECAM_V2: config_v2.toml layered over config.toml).
 //
-// Keys: d = toggle markers/bounding boxes, f = toggle meme overlays, i = gesture debug scores, r = record,
+// Keys: d = toggle markers/bounding boxes, f = toggle meme overlays, m = mute meme sounds, i = gesture debug scores, r = record,
 //       c = recalibrate head pose, q / Esc = quit
 #include <algorithm>
 #include <atomic>
@@ -30,6 +30,7 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 
+#include "audio.h"
 #include "compose.h"
 #include "config.h"
 #include "crowd.h"
@@ -281,7 +282,7 @@ std::string recording_path() {
 struct Args {
     std::optional<int> camera;
     std::string video, snapshot, config;
-    bool realtime = false, no_pose = false, no_mirror = false, verbose = false, events = false;
+    bool realtime = false, no_pose = false, no_mirror = false, verbose = false, events = false, mute = false;
     int frames = 60;
     std::optional<double> bench;
     std::vector<std::string> force;
@@ -365,6 +366,11 @@ int run(const Args& args) {
                     join_names(active).c_str(), args.snapshot.c_str());
     };
 
+    std::unique_ptr<Sounds> sounds;   // meme sounds only in the window (not for --snapshot / --bench / --events)
+    if (!headless) {
+        sounds = std::make_unique<Sounds>(cfg, project_path("assets"));
+        sounds->muted = args.mute;
+    }
     if (!headless) {
         // GUI_NORMAL: no Qt toolbar (its save/zoom buttons open dialogs).
         cv::namedWindow(TITLE, cv::WINDOW_NORMAL | cv::WINDOW_GUI_NORMAL);
@@ -417,6 +423,7 @@ int run(const Args& args) {
             static const std::vector<Shown> none;
             active = compose(frame, cur->fr, show_memes ? cur->shown : none, now, cfg, media, cinema, show_markers,
                              on_face);
+            if (sounds) sounds->update(active);
             auto t = Clock::now();
             fps = 0.9 * fps + 0.1 / std::max(std::chrono::duration<double>(t - last).count(), 1e-3);
             last = t;
@@ -427,7 +434,9 @@ int run(const Args& args) {
             }
             std::optional<double> track_fps;
             if (live) track_fps = det_fps;
-            hud(frame, fps, active, writer.isOpened(), show_markers, track_fps, show_memes);
+            std::optional<bool> sound_on;
+            if (sounds && sounds->ok()) sound_on = !sounds->muted;
+            hud(frame, fps, active, writer.isOpened(), show_markers, track_fps, show_memes, sound_on);
             draw_time += std::chrono::duration<double>(Clock::now() - d0).count();
 
             if (writer.isOpened()) writer.write(frame);
@@ -471,6 +480,7 @@ int run(const Args& args) {
             if (key == 'q' || key == 27 || !window_open(TITLE)) break;
             if (key == 'f') show_memes = !show_memes;
             else if (key == 'd') show_markers = !show_markers;
+            else if (key == 'm' && sounds) sounds->muted = !sounds->muted;
             else if (key == 'i') show_debug = !show_debug;
             else if (key == 'c') {
                 if (live_tracker) live_tracker->calibrate();   // detector state belongs to the tracking thread
@@ -499,6 +509,7 @@ int run(const Args& args) {
     }
     // Order matters: stop the tracking thread before the models go away, and the grabber before releasing
     // the capture it reads from.
+    sounds.reset();
     live_tracker.reset();
     grabber.reset();
     cap.release();
@@ -513,7 +524,7 @@ int run(const Args& args) {
 int main(int argc, char** argv) {
     CLI::App app{std::string(TITLE) +
                  ": webcam + mocap markers + gesture-triggered memes.\n"
-                 "Keys: d = toggle markers/bounding boxes, f = toggle meme overlays, i = gesture debug scores,\n"
+                 "Keys: d = toggle markers/bounding boxes, f = toggle meme overlays, m = mute sounds, i = gesture debug scores,\n"
                  "      r = record, c = recalibrate head pose, q / Esc = quit"};
     Args args;
     args.config = project_path("config/config.toml");
@@ -532,6 +543,7 @@ int main(int argc, char** argv) {
                                           "tracking FPS, exit");
     app.add_flag("--events", args.events,
                  "headless, with --video: track every frame, print each meme switching on/off and a summary");
+    app.add_flag("--mute", args.mute, "start with the meme sounds muted (toggle: m)");
     app.add_flag("--verbose", args.verbose, "show LiteRT/OpenCV/Qt log output");
     CLI11_PARSE(app, argc, argv);
 

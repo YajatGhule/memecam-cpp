@@ -60,6 +60,8 @@ void apply(Config& cfg, const toml::table& root) {
     get_num(root["person"].as_table(), "min_face_width", cfg.min_face_width);
     get_num(root["person"].as_table(), "forget", cfg.forget);
     get(root["display"].as_table(), "meme_on_face", cfg.meme_on_face);
+    get(root["audio"].as_table(), "enabled", cfg.audio_enabled);
+    get_num(root["audio"].as_table(), "volume", cfg.audio_volume);
 
     if (const toml::table* thr = root["thresholds"].as_table()) {
         for (const auto& [k, v] : *thr) {
@@ -86,6 +88,7 @@ void apply(Config& cfg, const toml::table& root) {
             }
             MemeSpec& m = *it;
             get(t, "asset", m.asset);
+            get(t, "sound", m.sound);
             get(t, "title", m.title);
             get(t, "placement", m.placement);
             get_num(t, "height", m.height);

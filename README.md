@@ -62,7 +62,7 @@ Flags: `--camera N`, `--no-pose` (faster), `--config FILE`, `--video FILE`, `--r
 `--snapshot FILE --frames N`, `--force MEME` (repeatable), `--bench SECONDS`, `--events`, `--verbose` (show LiteRT /
 OpenCV / Qt logs).
 
-Keys: `d` markers and boxes, `f` meme overlays, `i` gesture debug scores, `r` record to
+Keys: `d` markers and boxes, `f` meme overlays, `m` mute sounds, `i` gesture debug scores, `r` record to
 `~/Videos/memecam-*.mp4`, `c` recalibrate head pose, `q` / `Esc` quit.
 
 Settings live in `config/config.toml`: camera, tracking device, `[person]` (minimum face width, so people in
@@ -99,6 +99,14 @@ Rendering check against the Python app: `tools/dump_frame.py` (run in the Python
 frame plus its tracking state; `build/render_check <prefix>` redraws it with the C++ renderer and writes
 `<prefix>_cmp.png` (python | c++ | diff x4) and the pixel difference. All memes match to within rounding
 (only the Cinema caption differs by a few pixels from the font rasteriser).
+
+## Meme sounds
+
+Each meme's sound plays while the meme is on screen (from the start each time it switches on, a quick fade
+when it switches off); `m` mutes, `--mute` starts muted, `[audio]` in the config sets the volume. The sounds
+are `assets/sounds/<meme>.wav` (git-ignored: they are copyrighted clips); `tools/fetch_sounds.sh` downloads the
+default set with yt-dlp + ffmpeg. Use your own by dropping a WAV there or setting `sound = "file.wav"` in a
+`[memes.*]` table.
 
 ## Meme assets
 

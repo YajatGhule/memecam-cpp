@@ -17,6 +17,8 @@ file(GLOB CORE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 list(FILTER CORE_SOURCES EXCLUDE REGEX ".*/src/(app|main)[^/]*\\.cpp$")
 add_library(memecam_core STATIC ${CORE_SOURCES})
 target_include_directories(memecam_core PUBLIC src)
+target_include_directories(memecam_core SYSTEM PRIVATE ${miniaudio_SOURCE_DIR})
+target_link_libraries(memecam_core PRIVATE ${CMAKE_DL_LIBS} m)
 target_link_libraries(memecam_core PUBLIC ${OpenCV_LIBS} Threads::Threads tomlplusplus::tomlplusplus)
 target_compile_definitions(memecam_core PUBLIC MEMECAM_ROOT="${CMAKE_SOURCE_DIR}")
 # Rendering: bold TTF captions through OpenCV's freetype module when available (else OpenCV's built-in font).

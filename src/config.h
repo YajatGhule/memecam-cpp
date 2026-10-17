@@ -10,6 +10,7 @@ namespace memecam {
 
 struct MemeSpec {
     std::string name, asset, title, placement = "beside";
+    std::string sound;                            // relative to assets/; empty = assets/sounds/<name>.wav if present
     double height = 0.35, hold = 0.3, min_show = 0.0, linger = 0.3, cooldown = 0.0;
     bool key_black = false;
     std::optional<std::pair<int, int>> frames;    // trim [first, last]
@@ -26,6 +27,9 @@ struct Config {
     double min_face_width = 0.08, forget = 1.0;
     // [display]
     bool meme_on_face = false;
+    // [audio]
+    bool audio_enabled = true;
+    double audio_volume = 0.8;
     // [thresholds]: free-form numbers/bools (bools stored as 0/1), read via thr(key, default)
     std::map<std::string, double> thresholds;
     // [memes.*] in file order (base file first, then memes new in the overlay)
