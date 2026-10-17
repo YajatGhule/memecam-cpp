@@ -18,8 +18,6 @@ constexpr double WRIST_STRAY = 2.5;       // a pose wrist this far (face-widths,
 constexpr double GHOST_DIST = 2.0;        // a face-less pose this close (face-widths) to another person's head is a duplicate
 constexpr double ID_MAX_JUMP = 1.5;       // identity: a head moves at most this many face-widths between frames
 constexpr int ID_CONFIRM = 2;             // identity: frames a person must be seen before a dropout of theirs claims hands
-constexpr int SCAN_EVERY = 10;            // with one person in view, look for more people every this many frames
-constexpr double CROWD_LINGER = 1.5;      // seconds with ≤1 person before going back to the faster 1-person models
 constexpr double ID_FORGET = 1.0;         // seconds an unseen person keeps their id (bridges tracking dropouts only)
 
 struct HeadRef { cv::Point2d nose; double width; };   // a head position (nose, or nose/mouth point) + face width

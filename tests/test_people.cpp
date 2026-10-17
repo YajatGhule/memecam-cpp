@@ -399,7 +399,8 @@ TEST_CASE("config loads v1 and merges v2 overlay", "[config]") {
     CHECK(v1.thr("extra_gestures", 0.0) == 0.0);
     CHECK(v1.thr("bounce_speed", 0.0) == 1.0);
     CHECK(v1.meme_on_face);
-    CHECK(v1.max_people == 3);
+    CHECK(v1.min_face_width == 0.08);
+    CHECK(v1.forget == 1.0);
     const MemeSpec* hig = v1.meme("higuruma");
     REQUIRE(hig);
     CHECK(hig->frames == std::make_pair(114, 176));

@@ -57,9 +57,8 @@ void apply(Config& cfg, const toml::table& root) {
     get(root["camera"].as_table(), "height", cfg.height);
     get(root["camera"].as_table(), "mirror", cfg.mirror);
     get(root["tracking"].as_table(), "device", cfg.device);
-    get(root["people"].as_table(), "max_people", cfg.max_people);
-    get_num(root["people"].as_table(), "min_face_width", cfg.min_face_width);
-    get_num(root["people"].as_table(), "forget", cfg.forget);
+    get_num(root["person"].as_table(), "min_face_width", cfg.min_face_width);
+    get_num(root["person"].as_table(), "forget", cfg.forget);
     get(root["display"].as_table(), "meme_on_face", cfg.meme_on_face);
 
     if (const toml::table* thr = root["thresholds"].as_table()) {

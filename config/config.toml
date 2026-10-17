@@ -20,10 +20,9 @@ mirror = true
 [tracking]
 device = "auto"         # auto = dedicated NVIDIA/AMD GPU if present, else CPU; or "gpu" / "cpu"
 
-[people]
-max_people = 3          # track up to this many people; each one's memes fire on their own
+[person]                # one person is tracked: the one closest to the camera
 min_face_width = 0.08   # ignore faces narrower than this fraction of the frame width (people in the background)
-forget = 1.0            # seconds a person who drops out keeps their id (tracking dropouts only; nothing of theirs is drawn meanwhile)
+forget = 1.0            # seconds tracking dropouts are bridged (the person keeps their meme state meanwhile)
 
 [display]
 meme_on_face = true     # every meme goes on top of the face of whoever triggered it (overrides placement;

@@ -22,8 +22,7 @@ struct Config {
     bool mirror = true;
     // [tracking]
     std::string device = "auto";
-    // [people]
-    int max_people = 3;
+    // [person] (one person is tracked: the closest)
     double min_face_width = 0.08, forget = 1.0;
     // [display]
     bool meme_on_face = false;
