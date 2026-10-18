@@ -12,7 +12,6 @@
 #include <cstdlib>
 #include <ctime>
 #include <exception>
-#include <fcntl.h>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -20,8 +19,20 @@
 #include <optional>
 #include <string>
 #include <thread>
-#include <unistd.h>
 #include <vector>
+
+#ifdef _WIN32
+#include <io.h>
+#define dup _dup
+#define dup2 _dup2
+#define close _close
+#define fdopen _fdopen
+static constexpr const char* NULL_DEVICE = "NUL";
+#else
+#include <fcntl.h>
+#include <unistd.h>
+static constexpr const char* NULL_DEVICE = "/dev/null";
+#endif
 
 #include <CLI/CLI.hpp>
 #include <opencv2/core/utils/logger.hpp>
@@ -53,24 +64,36 @@ namespace {
 FILE* g_err = stderr;                      // our own errors; stays visible when native logs are hidden
 std::atomic<bool> g_interrupted{false};
 
+void set_env(const char* k, const char* v) {
+#ifdef _WIN32
+    _putenv_s(k, v);
+#else
+    setenv(k, v, 1);
+#endif
+}
+
 double since(Clock::time_point t0) { return std::chrono::duration<double>(Clock::now() - t0).count(); }
 
 // Hide the native log spam (LiteRT/XNNPACK, OpenCV, Qt/GTK) that goes straight to the stderr file
 // descriptor, while keeping our own error messages visible (`--verbose` keeps everything).
 void quiet_native_logs() {
-    setenv("TF_CPP_MIN_LOG_LEVEL", "3", 1);
-    setenv("GLOG_minloglevel", "3", 1);
-    setenv("OPENCV_LOG_LEVEL", "SILENT", 1);
-    setenv("OPENCV_FFMPEG_LOGLEVEL", "-8", 1);
-    setenv("QT_LOGGING_RULES", "*=false", 1);
+    set_env("TF_CPP_MIN_LOG_LEVEL", "3");
+    set_env("GLOG_minloglevel", "3");
+    set_env("OPENCV_LOG_LEVEL", "SILENT");
+    set_env("OPENCV_FFMPEG_LOGLEVEL", "-8");
+    set_env("QT_LOGGING_RULES", "*=false");
     cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_SILENT);
     int keep = dup(2);
-    int devnull = open("/dev/null", O_WRONLY);
-    if (keep < 0 || devnull < 0) return;
-    dup2(devnull, 2);
-    close(devnull);
+    FILE* null_file = std::fopen(NULL_DEVICE, "w");
+    if (keep < 0 || !null_file) return;
+    dup2(fileno(null_file), 2);
+    std::fclose(null_file);
     if (FILE* f = fdopen(keep, "w")) {
+#ifdef _WIN32
+        setvbuf(f, nullptr, _IONBF, 0);   // MSVC has no line buffering
+#else
         setvbuf(f, nullptr, _IOLBF, 0);
+#endif
         g_err = f;
     }
 }
@@ -270,7 +293,11 @@ std::string join_names(const std::vector<std::string>& v) {
 }
 
 std::string recording_path() {
+#ifdef _WIN32
+    const char* home = std::getenv("USERPROFILE");
+#else
     const char* home = std::getenv("HOME");
+#endif
     fs::path dir = fs::path(home ? home : ".") / "Videos";
     fs::create_directories(dir);
     char stamp[32];
@@ -307,7 +334,11 @@ int run(const Args& args) {
         clock.emplace(cap);
         W = int(cap.get(cv::CAP_PROP_FRAME_WIDTH)), H = int(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
     } else {
+#ifdef _WIN32
+        cap.open(args.camera.value_or(cfg.camera_index), cv::CAP_DSHOW);
+#else
         cap.open(args.camera.value_or(cfg.camera_index), cv::CAP_V4L2);
+#endif
         cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
         cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
         cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);

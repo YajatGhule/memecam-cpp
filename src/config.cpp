@@ -6,6 +6,12 @@
 
 #include <toml++/toml.hpp>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #ifndef MEMECAM_ROOT
 #define MEMECAM_ROOT "."
 #endif
@@ -14,10 +20,37 @@ namespace memecam {
 
 namespace fs = std::filesystem;
 
+namespace {
+fs::path exe_dir() {
+    std::error_code ec;
+#ifdef _WIN32
+    wchar_t buf[MAX_PATH * 4];
+    DWORD n = GetModuleFileNameW(nullptr, buf, DWORD(std::size(buf)));
+    if (n == 0 || n >= std::size(buf)) return {};
+    return fs::path(std::wstring(buf, n)).parent_path();
+#else
+    fs::path p = fs::read_symlink("/proc/self/exe", ec);
+    return ec ? fs::path() : p.parent_path();
+#endif
+}
+
+// Where config/, assets/ and models/ live: next to the executable in a packaged build (a release zip),
+// else the source tree the binary was built from.
+const fs::path& root() {
+    static const fs::path r = [] {
+        fs::path d = exe_dir();
+        std::error_code ec;
+        if (!d.empty() && fs::exists(d / "config" / "config.toml", ec)) return d;
+        return fs::path(MEMECAM_ROOT);
+    }();
+    return r;
+}
+}  // namespace
+
 std::string project_path(const std::string& rel) {
     fs::path p(rel);
     if (p.is_absolute()) return rel;
-    return (fs::path(MEMECAM_ROOT) / p).string();
+    return (root() / p).string();
 }
 
 namespace {
