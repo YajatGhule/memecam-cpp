@@ -24,6 +24,17 @@ using namespace memecam;
 
 namespace {
 
+// Hand recall vs the body pose: a pose wrist that is clearly visible (and inside the frame) should have a hand
+// whose wrist is near it. Counts such wrists and how many have a hand, for MediaPipe and for C++.
+struct Recall {
+    long wrists = 0, py_hit = 0, cpp_hit = 0, py_only = 0, cpp_only = 0;
+};
+bool has_hand_near(const std::vector<cv::Point2d>& hand_wrists, cv::Point2d w, double r) {
+    for (auto& h : hand_wrists)
+        if (cv::norm(h - w) < r) return true;
+    return false;
+}
+
 struct Acc {   // error statistics of one model
     std::vector<double> err;   // per matched instance: mean landmark error / scale
     long frames = 0, count_agree = 0, ref_n = 0, cpp_n = 0, matched = 0;
@@ -111,6 +122,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     Acc tot_h, tot_f, tot_p;
+    Recall tot_r;
     double tot_frames = 0, tot_secs = 0, tot_py_secs = 0;
     for (const auto& file : files) {
         std::ifstream in(file);
@@ -128,6 +140,7 @@ int main(int argc, char** argv) {
         std::unique_ptr<Tracker> tracker_p = std::make_unique<Tracker>(cfg, true, async);
         long read_idx = -1;
         Acc h, f, p;
+        Recall rec;
         long n = 0, decode_bad = 0;
         double secs = 0;
         cv::Mat bgr, rgb;
@@ -187,6 +200,29 @@ int main(int argc, char** argv) {
                 h.gesture_agree += g;
                 if (!g) ++h.confusions[rj["gesture"].get<std::string>() + "->" + raw.hands[j].gesture];
             }
+            // hand recall against MediaPipe's own pose (same wrists for both)
+            if (!fr["poses"].empty()) {
+                const auto& pp = fr["poses"][0];
+                const int W = ref.value("width", 1280), H = ref.value("height", 720);
+                cv::Point2d l11(pp[11][0].get<double>(), pp[11][1].get<double>());
+                cv::Point2d l12(pp[12][0].get<double>(), pp[12][1].get<double>());
+                const double sw = cv::norm(l11 - l12);
+                std::vector<cv::Point2d> pyw, cw;
+                for (auto& q : rh) pyw.push_back(q[0]);
+                for (auto& q : ch) cw.push_back(q[0]);
+                for (int k : {15, 16}) {
+                    const auto& q = pp[k];
+                    cv::Point2d w(q[0].get<double>(), q[1].get<double>());
+                    if (q[3].get<double>() < 0.8 || w.x < 20 || w.y < 20 || w.x > W - 20 || w.y > H - 20 || sw < 40)
+                        continue;
+                    ++rec.wrists;
+                    const bool a = has_hand_near(pyw, w, 0.5 * sw), b = has_hand_near(cw, w, 0.5 * sw);
+                    rec.py_hit += a;
+                    rec.cpp_hit += b;
+                    rec.py_only += a && !b;
+                    rec.cpp_only += b && !a;
+                }
+            }
             // faces: normalized by the reference face width (234 - 454)
             std::vector<Pts> rf, cf;
             std::vector<double> fs;
@@ -234,6 +270,15 @@ int main(int argc, char** argv) {
         std::printf("== %s: %ld frames, C++ %.1f fps (Python dump %.1f fps)%s\n", clip.c_str(), n, n / secs,
                     ref.value("fps", 0.0), decode_bad ? "  DECODE MISMATCH" : "");
         report("hands", h, "hand size");
+        auto report_recall = [](const Recall& r) {
+            if (r.wrists)
+                std::printf("         hand recall at visible pose wrists: MediaPipe %.1f%%  C++ %.1f%%  (%ld wrists; "
+                            "only MediaPipe %ld, only C++ %ld)\n", 100.0 * r.py_hit / r.wrists, 100.0 * r.cpp_hit / r.wrists,
+                            r.wrists, r.py_only, r.cpp_only);
+        };
+        report_recall(rec);
+        tot_r.wrists += rec.wrists, tot_r.py_hit += rec.py_hit, tot_r.cpp_hit += rec.cpp_hit;
+        tot_r.py_only += rec.py_only, tot_r.cpp_only += rec.cpp_only;
         if (h.matched)
             std::printf("         handedness agreement %.1f%%, gesture agreement %.1f%%\n",
                         100.0 * h.label_agree / h.matched, 100.0 * h.gesture_agree / h.matched);
@@ -264,6 +309,10 @@ int main(int argc, char** argv) {
         std::printf("== TOTAL %.0f frames, C++ %.1f fps, Python %.1f fps\n", tot_frames, tot_frames / tot_secs,
                     tot_frames / tot_py_secs);
         report("hands", tot_h, "hand size");
+        if (tot_r.wrists)
+            std::printf("         hand recall at visible pose wrists: MediaPipe %.1f%%  C++ %.1f%%  (%ld wrists; "
+                        "only MediaPipe %ld, only C++ %ld)\n", 100.0 * tot_r.py_hit / tot_r.wrists,
+                        100.0 * tot_r.cpp_hit / tot_r.wrists, tot_r.wrists, tot_r.py_only, tot_r.cpp_only);
         if (tot_h.matched)
             std::printf("         handedness agreement %.1f%%, gesture agreement %.1f%%\n",
                         100.0 * tot_h.label_agree / tot_h.matched, 100.0 * tot_h.gesture_agree / tot_h.matched);

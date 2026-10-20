@@ -44,17 +44,43 @@ struct HandResult {
     float gesture_score = 0;
 };
 
+// Additions on top of MediaPipe's hand graph (each can be switched off; all off = MediaPipe behaviour):
+struct HandOptions {
+    bool pose_seeds = true;       // a visible body-pose wrist without a hand seeds a hand crop (Holistic-style)
+    bool predict = true;          // move each tracked hand's next crop along its velocity (fast hands)
+    bool smooth = true;           // one-euro smoothing of the output landmarks per tracked hand
+    bool pose_handedness = true;  // Left / Right from the body pose wrist the hand sits on
+    static HandOptions mediapipe() { return {false, false, false, false}; }
+};
+
+// One body-pose arm, for pose_seeds / pose_handedness (pixels).
+struct PoseHand {
+    cv::Point2f wrist, pinky, index;
+    float visibility = 0;
+    float shoulder_width = 0;
+    std::string label;            // "Left" / "Right" in the hand model's convention
+};
+
 class HandTracker {
 public:
-    HandTracker(HandModels& m, int num_hands) : m_(m), num_(num_hands) {}
-    std::vector<HandResult> process(const cv::Mat& rgb, int64_t ts_ms);
+    HandTracker(HandModels& m, int num_hands, HandOptions opt = {}) : m_(m), num_(num_hands), opt_(opt) {}
+    std::vector<HandResult> process(const cv::Mat& rgb, int64_t ts_ms, const std::vector<PoseHand>& pose = {});
     int num_hands() const { return num_; }
 private:
+    struct Track {                // one tracked hand
+        NormRect next;            // crop for the next frame (MediaPipe's tracking ROI, plus prediction)
+        cv::Point2f center{}, vel{};
+        bool has_center = false;
+        std::string label;
+        std::optional<LandmarksSmoother> smoother;
+    };
+    struct Crop { NormRect rect; int track = -1; const PoseHand* arm = nullptr; };
     std::vector<NormRect> detect(const cv::Mat& rgb);
     void classify(HandResult& h, int W, int H);
     HandModels& m_;
     int num_;
-    std::vector<NormRect> prev_;
+    HandOptions opt_;
+    std::vector<Track> tracks_;
 };
 
 // ---- face ----------------------------------------------------------------------------------------

@@ -202,17 +202,55 @@ void HandTracker::classify(HandResult& h, int W, int H) {
     m_.stats.add(m_.stats.extra_ms, ms_since(t0));
 }
 
-std::vector<HandResult> HandTracker::process(const cv::Mat& rgb, int64_t) {
+// Hand crop from a body-pose arm, as MediaPipe Holistic does (HandDetectionsFromPoseToRectsCalculator + its
+// RectTransformation): centre on the estimated middle-finger knuckle, size twice its distance to the wrist,
+// rotated wrist -> knuckle, then scaled 2.7x (square) and shifted 0.1 towards the wrist.
+static NormRect rect_from_pose(const PoseHand& a, int W, int H) {
+    const cv::Point2f mid = (2.f * a.index + a.pinky) / 3.f;
+    const float box = 2.f * static_cast<float>(cv::norm(mid - a.wrist));
+    const float rot = normalize_radians(static_cast<float>(M_PI) * 0.5f -
+                                        std::atan2(-(mid.y - a.wrist.y), mid.x - a.wrist.x));
+    return transform_rect({mid.x / W, mid.y / H, box / W, box / H, rot}, W, H, 2.7f, 2.7f, 0.f, -0.1f, true);
+}
+
+std::vector<HandResult> HandTracker::process(const cv::Mat& rgb, int64_t ts_ms, const std::vector<PoseHand>& pose) {
     const auto t0 = Clock::now();
     const int W = rgb.cols, H = rgb.rows;
-    std::vector<NormRect> rects = prev_;
-    if (static_cast<int>(prev_.size()) < num_) rects = hand_association(prev_, detect(rgb), kMinTracking);
-    if (static_cast<int>(rects.size()) > num_) rects.resize(num_);
 
+    // 1. Crops: the tracked hands, then (MediaPipe) palm detections when fewer hands are tracked than wanted,
+    //    then body-pose arms that have no hand yet.
+    std::vector<Crop> crops;
+    std::vector<NormRect> tracked;
+    for (int i = 0; i < static_cast<int>(tracks_.size()); ++i) {
+        crops.push_back({tracks_[i].next, i});
+        tracked.push_back(tracks_[i].next);
+    }
+    if (static_cast<int>(crops.size()) < num_) {
+        const auto rects = hand_association(tracked, detect(rgb), kMinTracking);
+        for (size_t k = tracked.size(); k < rects.size(); ++k) crops.push_back({rects[k]});
+    }
+    if (opt_.pose_seeds && static_cast<int>(crops.size()) < num_) {
+        for (const PoseHand& arm : pose) {
+            if (static_cast<int>(crops.size()) >= num_) break;
+            if (arm.visibility < 0.5f || arm.shoulder_width < 20) continue;
+            const NormRect r = rect_from_pose(arm, W, H);
+            bool covered = false;   // a crop already around this wrist
+            for (const Crop& c : crops) {
+                const float d = std::hypot((c.rect.xc - r.xc) * W, (c.rect.yc - r.yc) * H);
+                if (d < 0.5f * std::max(c.rect.w * W, r.w * W)) covered = true;
+            }
+            if (!covered) crops.push_back({r, -1, &arm});
+        }
+    }
+    if (static_cast<int>(crops.size()) > num_) crops.resize(num_);
+
+    // 2. Hand landmarks in each crop.
     std::vector<HandResult> hands;
     std::vector<NormRect> next;
+    std::vector<int> from;   // crop index of each hand
     const auto t1 = Clock::now();
-    for (const auto& rect : rects) {
+    for (int ci = 0; ci < static_cast<int>(crops.size()); ++ci) {
+        const NormRect& rect = crops[ci].rect;
         if (!image_to_tensor(rgb, &rect, kLmSize, kLmSize, false, false, 0.f, 1.f, m_.landmarks.input(0), nullptr))
             continue;
         m_.landmarks.invoke();
@@ -235,18 +273,62 @@ std::vector<HandResult> HandTracker::process(const cv::Mat& rgb, int64_t) {
         h.label = h.handedness >= 1.f - h.handedness ? "Right" : "Left";
         next.push_back(transform_rect(hand_landmarks_to_rect(h.lms, W, H), W, H, 2.f, 2.f, 0.f, -0.1f, true));
         hands.push_back(std::move(h));
+        from.push_back(ci);
     }
     m_.stats.add(m_.stats.lm_ms, ms_since(t1));
 
+    // 3. Drop duplicates, classify gestures (on the raw landmarks, like MediaPipe), update the tracks.
     const auto dup = find_duplicates(hands, W, H);
     std::vector<HandResult> kept;
-    prev_.clear();
-    for (int i = 0; i < static_cast<int>(hands.size()); ++i)
-        if (!dup.count(i)) {
-            kept.push_back(std::move(hands[i]));
-            prev_.push_back(next[i]);
+    std::vector<Track> tracks;
+    for (int i = 0; i < static_cast<int>(hands.size()); ++i) {
+        if (dup.count(i)) continue;
+        HandResult& h = hands[i];
+        classify(h, W, H);
+        const Crop& crop = crops[from[i]];
+        Track t = crop.track >= 0 ? std::move(tracks_[crop.track]) : Track{};
+        const cv::Point2f center(next[i].xc * W, next[i].yc * H);
+
+        // Velocity prediction: a hand moving fast leaves its crop before the next frame; move the crop along.
+        NormRect nr = next[i];
+        if (opt_.predict && t.has_center) {
+            const cv::Point2f v = center - t.center;
+            t.vel = 0.6f * v + 0.4f * t.vel;
+            cv::Point2f shift = 0.5f * t.vel;   // half a step: full constant-velocity overshoots when a hand turns
+            const float lim = 0.3f * nr.w * W, len = static_cast<float>(cv::norm(shift));
+            if (len > lim) shift *= lim / len;
+            nr.xc += shift.x / W;
+            nr.yc += shift.y / H;
         }
-    for (auto& h : kept) classify(h, W, H);
+        t.next = nr;
+        t.center = center;
+        t.has_center = true;
+
+        // Handedness from the body pose: the pose wrist this hand sits on (clearly nearer than the other one).
+        if (opt_.pose_handedness) {
+            const PoseHand* best = nullptr;
+            float d1 = 1e9f, d2 = 1e9f;
+            const cv::Point2f w(h.lms[0].x * W, h.lms[0].y * H);
+            for (const PoseHand& arm : pose) {
+                if (arm.visibility < 0.5f) continue;
+                const float d = static_cast<float>(cv::norm(arm.wrist - w));
+                if (d < d1) d2 = d1, d1 = d, best = &arm;
+                else d2 = std::min(d2, d);
+            }
+            if (best && d1 < 0.4f * best->shoulder_width && d2 > 2.f * d1) t.label = best->label;
+            else if (crop.arm && t.label.empty()) t.label = crop.arm->label;
+            if (!t.label.empty()) h.label = t.label;
+        }
+
+        // Smoothing (output only; the crops above use the raw landmarks). Scale: the hand crop size.
+        if (opt_.smooth) {
+            if (!t.smoother) t.smoother.emplace(OneEuroParams{0.05, 80.0, 1.0});
+            t.smoother->apply(h.lms, ts_ms * 1000, W, H, next[i].w * W / 2.f);
+        }
+        kept.push_back(std::move(h));
+        tracks.push_back(std::move(t));
+    }
+    tracks_ = std::move(tracks);
     m_.stats.add(m_.stats.total_ms, ms_since(t0));
     m_.stats.calls.fetch_add(1);
     return kept;

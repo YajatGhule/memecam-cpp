@@ -83,6 +83,11 @@ thresholds, and one `[memes.*]` table per meme (asset, title, placement, height,
   The detectors only run when tracking is lost; every 15 (face) / 30 (body) frames the detector also checks
   for a clearly bigger face/body than the tracked one and switches to it, so it never sticks to someone in
   the background.
+- Hands go beyond MediaPipe's graph: a visible body-pose wrist with no hand seeds a hand crop (as MediaPipe
+  Holistic does), tracked crops move with the hand's velocity, the output points are one-euro smoothed, and
+  Left / Right comes from the body pose. On the recorded clips hands are found at 95.4 % of visible wrists
+  (MediaPipe: 92.0 %). `MEMECAM_HAND_MP=1` turns all of it off (plain MediaPipe), `MEMECAM_HAND_OFF=seeds,
+  predict,smooth,handed` single parts.
 - `src/tracking.*` - attaches hands and body to the face (and drops background faces), motion map.
 - `src/gestures.*` - all gesture detectors and the `Trigger` state machine (1:1 with `gestures.py`). A meme
   shows only while its gesture is active (hold 0.3 s to start, 0.3 s linger after).

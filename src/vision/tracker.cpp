@@ -6,6 +6,7 @@
 #include <future>
 #include <sstream>
 #include <thread>
+#include <tuple>
 
 #include <opencv2/imgproc.hpp>
 
@@ -58,7 +59,19 @@ struct Tracker::Impl {
         const int threads = model_threads();
         hand_models = std::make_unique<HandModels>(dir, threads);
         face_models = std::make_unique<FaceModels>(dir, threads);
-        hands = std::make_unique<HandTracker>(*hand_models, 2);
+        // MEMECAM_HAND_MP=1: MediaPipe's own hand graph, without the pose-seeded crops, prediction, smoothing
+        // and pose handedness (for comparisons with the Python app).
+        // MEMECAM_HAND_OFF=predict,smooth,...: switch single additions off.
+        const char* mp = std::getenv("MEMECAM_HAND_MP");
+        HandOptions ho = mp && *mp == '1' ? HandOptions::mediapipe() : HandOptions{};
+        if (const char* off = std::getenv("MEMECAM_HAND_OFF")) {
+            const std::string o = off;
+            if (o.find("seeds") != std::string::npos) ho.pose_seeds = false;
+            if (o.find("predict") != std::string::npos) ho.predict = false;
+            if (o.find("smooth") != std::string::npos) ho.smooth = false;
+            if (o.find("handed") != std::string::npos) ho.pose_handedness = false;
+        }
+        hands = std::make_unique<HandTracker>(*hand_models, 2, ho);
         face = std::make_unique<FaceTracker>(*face_models, 1, RESCAN_FACE);
         if (use_pose) {
             pose_models = std::make_unique<PoseModels>(dir, threads);
@@ -82,7 +95,19 @@ struct Tracker::Impl {
         const double now = ts_ms / 1000.0;
         raw = TrackerRaw{};
 
-        auto hands_job = std::async(std::launch::async, [&] { return hands->process(rgb, ts_ms); });
+        // The body pose of the latest finished pose job (usually the previous frame) guides the hand tracker.
+        std::vector<PoseHand> arms;
+        if (!last_poses.empty()) {
+            const Pose& p = *last_poses[0];
+            auto pt = [&](int i) { return cv::Point2f(float(p[i].x), float(p[i].y)); };
+            const float sw = float(cv::norm(pt(11) - pt(12)));
+            // Pose landmarks 15/17/19 are the subject's left wrist / pinky / index: in the mirrored frame that
+            // is the hand the hand model calls "Left" (checked on the recorded clips: 96 % agreement).
+            for (auto [w, pk, ix, label] : {std::tuple{15, 17, 19, "Left"}, std::tuple{16, 18, 20, "Right"}})
+                arms.push_back({pt(w), pt(pk), pt(ix),
+                                float(std::min({p[w].visibility, p[pk].visibility, p[ix].visibility})), sw, label});
+        }
+        auto hands_job = std::async(std::launch::async, [&] { return hands->process(rgb, ts_ms, arms); });
         auto face_job = std::async(std::launch::async, [&] { return face->process(rgb, ts_ms); });
         if (pose && !pose_job) {
             // The pose job may outlive this frame: give it its own reference to the pixels.
