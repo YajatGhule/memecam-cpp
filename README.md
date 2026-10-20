@@ -11,6 +11,12 @@ Two executables are built:
 - `memecam`   - the original 11 gestures (`config/config.toml`)
 - `memecamv2` - the same plus the v2 gestures (Godfather, looksmaxxing; `config/config_v2.toml` is layered on top)
 
+## Windows
+
+Download `MemeCam-cpp-Windows.zip` from [Releases](https://github.com/YajatGhule/memecam-cpp/releases/latest),
+unzip, and double-click `memecam.exe` (or `memecamv2.exe`). No install needed. If Windows shows "Windows
+protected your PC", click **More info** → **Run anyway**.
+
 ## Install (Linux)
 
 ```sh
